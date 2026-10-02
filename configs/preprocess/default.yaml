@@ -1,0 +1,19 @@
+bandpass:
+  enabled: true
+  low_hz: 0.5
+  high_hz: 40.0
+  order: 4
+invert:
+  enabled: true
+normalize:
+  enabled: true
+length:
+  enabled: true
+  seconds: 60
+  mode: mask
+augment:
+  enabled: true
+  max_shift_seconds: 0.4
+  scale_min: 0.9
+  scale_max: 1.1
+  noise_std: 0.02
