@@ -1,0 +1,6 @@
+name: 04_selective
+eval_only: true
+source_run: runs/03_dilated_resnet
+selective:
+  min_coverage: 0.5
+  thresholds: [0.5, 0.6, 0.7, 0.8, 0.9]
