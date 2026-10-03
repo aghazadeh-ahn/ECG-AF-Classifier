@@ -1,0 +1,44 @@
+{
+  "experiment": "05_dilated_resnet_wide",
+  "compared_to": "03_dilated_resnet",
+  "change": "Wider and deeper dilated residual network with the same preprocess and locked split.",
+  "model": {
+    "name": "dilated_resnet",
+    "channels": [32, 64, 128, 256, 256],
+    "dilations": [1, 2, 4, 8, 16],
+    "dropout": 0.25,
+    "n_parameters": 902500
+  },
+  "baseline_03": {
+    "n_parameters": 111668,
+    "challenge_f1_test": 0.7960841800458048,
+    "cv_challenge_f1_mean": 0.8209442633646145,
+    "per_class_f1_test": {
+      "N": 0.8970661362506216,
+      "A": 0.7584097859327217,
+      "O": 0.732776617954071,
+      "~": 0.6551724137931034
+    }
+  },
+  "challenge_f1_test": 0.7711713029149657,
+  "cv_challenge_f1_mean": 0.8325779080948734,
+  "cv_challenge_f1_std": 0.013256511674210556,
+  "fold_scores": [
+    0.8347379304811459,
+    0.8065821566522828,
+    0.8384124435318032,
+    0.8426195211009145,
+    0.8405374887082205
+  ],
+  "best_epochs": [25, 15, 32, 23, 18],
+  "refit_epochs": 23,
+  "per_class_f1_test": {
+    "N": 0.9025942241801272,
+    "A": 0.6744186046511628,
+    "O": 0.7365010799136069,
+    "~": 0.5405405405405406
+  },
+  "seconds_per_record": 0.0025313300703310193,
+  "wall_seconds": 4969.991511600005,
+  "note": "Cross-validation rose, but the locked test score fell. AF F1 dropped the most, so the wider model overfits the training folds under the current training recipe."
+}

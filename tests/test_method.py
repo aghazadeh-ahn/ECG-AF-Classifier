@@ -121,10 +121,20 @@ def test_models_read_a_masked_minute():
     plain = build_model(
         {"name": "dilated_resnet", "channels": [8, 8], "dilations": [1, 1], "dropout": 0.0}
     )
+    wide = build_model(
+        {
+            "name": "dilated_resnet",
+            "channels": [32, 64, 128, 256, 256],
+            "dilations": [1, 2, 4, 8, 16],
+            "dropout": 0.0,
+        }
+    )
     assert cnn(signal, mask).shape == (2, 4)
     assert residual(signal, mask).shape == (2, 4)
     assert residual.dilations == [1, 4]
     assert plain.dilations == [1, 1]
+    assert wide(signal, mask).shape == (2, 4)
+    assert wide.dilations == [1, 2, 4, 8, 16]
 
 
 def test_threshold_is_chosen_from_the_arrays_it_is_given():
