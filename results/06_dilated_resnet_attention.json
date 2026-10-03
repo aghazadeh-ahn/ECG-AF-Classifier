@@ -1,0 +1,45 @@
+{
+  "experiment": "06_dilated_resnet_attention",
+  "compared_to": "03_dilated_resnet",
+  "change": "Same small dilated residual backbone with a masked temporal attention head instead of mean pooling.",
+  "model": {
+    "name": "dilated_resnet",
+    "channels": [16, 32, 64, 128],
+    "dilations": [1, 2, 4, 8],
+    "dropout": 0.2,
+    "pooling": "attention",
+    "n_parameters": 111797
+  },
+  "baseline_03": {
+    "n_parameters": 111668,
+    "challenge_f1_test": 0.7960841800458048,
+    "cv_challenge_f1_mean": 0.8209442633646145,
+    "per_class_f1_test": {
+      "N": 0.8970661362506216,
+      "A": 0.7584097859327217,
+      "O": 0.732776617954071,
+      "~": 0.6551724137931034
+    }
+  },
+  "challenge_f1_test": 0.7603849352728703,
+  "cv_challenge_f1_mean": 0.8138954275495408,
+  "cv_challenge_f1_std": 0.0092776967115284,
+  "fold_scores": [
+    0.8047033875174224,
+    0.8074476207868347,
+    0.8110335195053967,
+    0.8310508127222148,
+    0.8152417972158359
+  ],
+  "best_epochs": [9, 10, 11, 24, 8],
+  "refit_epochs": 10,
+  "per_class_f1_test": {
+    "N": 0.88,
+    "A": 0.7035830618892508,
+    "O": 0.6975717439293598,
+    "~": 0.5125628140703518
+  },
+  "seconds_per_record": 0.0015570089097283802,
+  "wall_seconds": 1115.4940545999852,
+  "note": "Attention added only 129 parameters. Both cross-validation and locked test fell below the mean-pooling baseline, so the attention head is not kept as the proposed model."
+}

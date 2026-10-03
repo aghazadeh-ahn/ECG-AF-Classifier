@@ -135,6 +135,18 @@ def test_models_read_a_masked_minute():
     assert plain.dilations == [1, 1]
     assert wide(signal, mask).shape == (2, 4)
     assert wide.dilations == [1, 2, 4, 8, 16]
+    attended = build_model(
+        {
+            "name": "dilated_resnet",
+            "channels": [8, 8],
+            "dilations": [1, 4],
+            "dropout": 0.0,
+            "pooling": "attention",
+        }
+    )
+    assert attended(signal, mask).shape == (2, 4)
+    assert attended.pooling_name == "attention"
+    assert attended.attention is not None
 
 
 def test_threshold_is_chosen_from_the_arrays_it_is_given():

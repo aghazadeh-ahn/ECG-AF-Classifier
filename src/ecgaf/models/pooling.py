@@ -22,3 +22,20 @@ def masked_global_average(values: torch.Tensor, mask: torch.Tensor) -> torch.Ten
     weighted = values * mask
     denominator = mask.sum(dim=-1).clamp(min=1.0)
     return weighted.sum(dim=-1) / denominator
+
+
+class MaskedTemporalAttention(torch.nn.Module):
+    """One lightweight score per time step, then a masked weighted average."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.score = torch.nn.Conv1d(channels, 1, kernel_size=1)
+
+    def forward(self, values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(1)
+        mask = resize_mask(mask, values.shape[-1]).to(dtype=values.dtype)
+        logits = self.score(values)
+        logits = logits.masked_fill(mask < 0.5, torch.finfo(logits.dtype).min)
+        weights = torch.softmax(logits, dim=-1)
+        return (values * weights).sum(dim=-1)

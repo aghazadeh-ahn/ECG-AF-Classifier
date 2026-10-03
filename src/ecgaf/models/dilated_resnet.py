@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from ecgaf.models.pooling import masked_global_average, resize_mask
+from ecgaf.models.pooling import MaskedTemporalAttention, masked_global_average, resize_mask
 from ecgaf.models.registry import register
 
 
@@ -52,12 +52,26 @@ def build_dilated_resnet(model_cfg: dict) -> nn.Module:
     if len(dilations) != len(channels):
         raise ValueError("dilations and channels must have the same length")
     dropout = float(model_cfg.get("dropout", 0.2))
-    return DilatedResNet(channels=channels, dilations=dilations, dropout=dropout)
+    pooling = str(model_cfg.get("pooling", "mean"))
+    return DilatedResNet(
+        channels=channels,
+        dilations=dilations,
+        dropout=dropout,
+        pooling=pooling,
+    )
 
 
 class DilatedResNet(nn.Module):
-    def __init__(self, channels: list[int], dilations: list[int], dropout: float) -> None:
+    def __init__(
+        self,
+        channels: list[int],
+        dilations: list[int],
+        dropout: float,
+        pooling: str = "mean",
+    ) -> None:
         super().__init__()
+        if pooling not in {"mean", "attention"}:
+            raise ValueError(f"Unknown pooling mode: {pooling}")
         self.stem = nn.Sequential(
             nn.Conv1d(1, channels[0], kernel_size=7, stride=2, padding=3),
             nn.BatchNorm1d(channels[0]),
@@ -77,6 +91,8 @@ class DilatedResNet(nn.Module):
             in_channels = out_channels
         self.stages = nn.ModuleList(stages)
         self.dilations = list(dilations)
+        self.pooling_name = pooling
+        self.attention = MaskedTemporalAttention(channels[-1]) if pooling == "attention" else None
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(channels[-1], 4)
 
@@ -85,5 +101,8 @@ class DilatedResNet(nn.Module):
         mask = resize_mask(mask, values.shape[-1])
         for stage in self.stages:
             values, mask = stage(values, mask)
-        pooled = masked_global_average(values, mask)
+        if self.attention is None:
+            pooled = masked_global_average(values, mask)
+        else:
+            pooled = self.attention(values, mask)
         return self.classifier(self.dropout(pooled))
