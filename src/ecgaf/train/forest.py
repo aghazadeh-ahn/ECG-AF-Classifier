@@ -48,6 +48,16 @@ def _fit_forest(features: np.ndarray, labels: np.ndarray, model_cfg: dict, seed:
     return forest
 
 
+def load_rr_matrix(records: list[Record], preprocess_cfg: dict, project_root: Path) -> np.ndarray:
+    feature_cfg = json.loads(json.dumps(preprocess_cfg))
+    feature_cfg["length"] = dict(feature_cfg["length"])
+    feature_cfg["length"]["enabled"] = False
+    feature_cfg["augment"] = dict(feature_cfg.get("augment", {}))
+    feature_cfg["augment"]["enabled"] = False
+    cache_path = project_root / "data" / "processed" / "features" / f"rr_{preprocess_cache_key(feature_cfg)}.npy"
+    return _feature_matrix(records, feature_cfg, cache_path)
+
+
 def run_forest(experiment: dict, records: list[Record], splits: dict, run_dir: Path) -> dict:
     labels = np.array([record.label for record in records])
     feature_cfg = json.loads(json.dumps(experiment["preprocess_cfg"]))

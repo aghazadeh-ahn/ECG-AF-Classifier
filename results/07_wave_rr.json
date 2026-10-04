@@ -1,0 +1,46 @@
+{
+  "experiment": "07_wave_rr",
+  "compared_to": "03_dilated_resnet",
+  "change": "Same small dilated residual encoder fused with a short RR-interval feature vector.",
+  "model": {
+    "name": "dilated_resnet_rr",
+    "channels": [16, 32, 64, 128],
+    "dilations": [1, 2, 4, 8],
+    "dropout": 0.2,
+    "rr_dim": 16,
+    "rr_hidden": 32,
+    "n_parameters": 113396
+  },
+  "baseline_03": {
+    "n_parameters": 111668,
+    "challenge_f1_test": 0.7960841800458048,
+    "cv_challenge_f1_mean": 0.8209442633646145,
+    "per_class_f1_test": {
+      "N": 0.8970661362506216,
+      "A": 0.7584097859327217,
+      "O": 0.732776617954071,
+      "~": 0.6551724137931034
+    }
+  },
+  "challenge_f1_test": 0.7077044790652386,
+  "cv_challenge_f1_mean": 0.8043968812253878,
+  "cv_challenge_f1_std": 0.02132890351162161,
+  "fold_scores": [
+    0.8065023233724945,
+    0.7932291529335639,
+    0.7748595936685471,
+    0.8399454323679368,
+    0.8074479037843969
+  ],
+  "best_epochs": [11, 12, 9, 20, 11],
+  "refit_epochs": 11,
+  "per_class_f1_test": {
+    "N": 0.7307692307692307,
+    "A": 0.7721518987341772,
+    "O": 0.6201923076923077,
+    "~": 0.5217391304347826
+  },
+  "seconds_per_record": 0.0018791956623676993,
+  "wall_seconds": 1380.2990741000003,
+  "note": "Cross-validation stayed near the baseline, but locked test fell sharply. Normal and Other F1 dropped the most, so RR fusion is not kept as the proposed model."
+}

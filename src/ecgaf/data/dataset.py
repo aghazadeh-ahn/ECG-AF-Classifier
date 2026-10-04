@@ -31,6 +31,14 @@ class ECGDataset(Dataset):
         self.seed = seed
         self.sampling_rate = sampling_rate
         self.epoch = 0
+        self.rr: np.ndarray | None = None
+        self.rr_mean: np.ndarray | None = None
+        self.rr_std: np.ndarray | None = None
+
+    def set_rr(self, rr: np.ndarray, mean: np.ndarray, std: np.ndarray) -> None:
+        self.rr = rr
+        self.rr_mean = mean.astype(np.float32)
+        self.rr_std = std.astype(np.float32)
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
@@ -52,4 +60,9 @@ class ECGDataset(Dataset):
                 rng,
             )
         label = CLASS_TO_INDEX[self.labels[global_index]]
-        return torch.from_numpy(signal), torch.from_numpy(mask), label
+        signal_tensor = torch.from_numpy(signal)
+        mask_tensor = torch.from_numpy(mask)
+        if self.rr is None:
+            return signal_tensor, mask_tensor, label
+        features = (self.rr[global_index] - self.rr_mean) / self.rr_std
+        return signal_tensor, mask_tensor, torch.from_numpy(features.astype(np.float32)), label

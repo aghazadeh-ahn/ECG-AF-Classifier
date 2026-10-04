@@ -23,6 +23,7 @@ from ecgaf.eval.metrics import (
     per_class_f1,
 )
 from ecgaf.models.registry import build_model, count_parameters
+from ecgaf.train.forest import load_rr_matrix
 from ecgaf.train.weights import class_weights
 
 
@@ -50,6 +51,18 @@ def _loader(dataset: ECGDataset, batch_size: int, shuffle: bool, num_workers: in
     )
 
 
+def _move_batch(batch: tuple, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]:
+    if len(batch) == 4:
+        signal, mask, extras, label = batch
+        extras = extras.to(device, non_blocking=True)
+    else:
+        signal, mask, label = batch
+        extras = None
+    signal = signal.to(device, non_blocking=True)
+    mask = mask.to(device, non_blocking=True)
+    return signal, mask, extras, label
+
+
 def _train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -62,12 +75,11 @@ def _train_one_epoch(
     loader.dataset.set_epoch(epoch)
     total = 0.0
     seen = 0
-    for signal, mask, label in loader:
-        signal = signal.to(device, non_blocking=True)
-        mask = mask.to(device, non_blocking=True)
+    for batch in loader:
+        signal, mask, extras, label = _move_batch(batch, device)
         label = label.to(device, non_blocking=True)
         optimizer.zero_grad(set_to_none=True)
-        logits = model(signal, mask)
+        logits = model(signal, mask) if extras is None else model(signal, mask, extras)
         loss = criterion(logits, label)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -83,10 +95,9 @@ def _predict(model: nn.Module, loader: DataLoader, device: torch.device) -> tupl
     predicted: list[np.ndarray] = []
     truth: list[np.ndarray] = []
     with torch.inference_mode():
-        for signal, mask, label in loader:
-            signal = signal.to(device, non_blocking=True)
-            mask = mask.to(device, non_blocking=True)
-            logits = model(signal, mask)
+        for batch in loader:
+            signal, mask, extras, label = _move_batch(batch, device)
+            logits = model(signal, mask) if extras is None else model(signal, mask, extras)
             probability = torch.softmax(logits, dim=-1)
             probabilities.append(probability.cpu().numpy())
             predicted.append(probability.argmax(dim=-1).cpu().numpy())
@@ -152,8 +163,10 @@ def _dataset(
     preprocess_cfg: dict,
     augment: bool,
     seed: int,
+    rr: np.ndarray | None = None,
+    rr_reference: np.ndarray | None = None,
 ) -> ECGDataset:
-    return ECGDataset(
+    dataset = ECGDataset(
         indices=indices,
         labels=labels,
         signals=signals,
@@ -162,12 +175,22 @@ def _dataset(
         augment=augment,
         seed=seed,
     )
+    if rr is not None and rr_reference is not None:
+        reference = rr[np.asarray(rr_reference, dtype=int)]
+        mean = reference.mean(axis=0)
+        std = reference.std(axis=0)
+        std[std < 1e-6] = 1.0
+        dataset.set_rr(rr, mean, std)
+    return dataset
 
 
 def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Path) -> dict:
     labels = [record.label for record in records]
     processed_dir = experiment["project_root"] / "data" / "processed"
     signals, masks, _inverted = ensure_signal_cache(records, experiment["preprocess_cfg"], processed_dir)
+    rr = None
+    if experiment["model"].get("use_rr"):
+        rr = load_rr_matrix(records, experiment["preprocess_cfg"], experiment["project_root"])
     device = _device()
     train_cfg = experiment["train"]
     batch_size = int(train_cfg["batch_size"])
@@ -183,8 +206,12 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
     for fold_id, fold in enumerate(splits["folds"]):
         print(f"fold {fold_id}", flush=True)
         model = build_model(experiment["model"])
-        train_set = _dataset(fold["train"], labels, signals, masks, experiment["preprocess_cfg"], True, seed + fold_id)
-        val_set = _dataset(fold["val"], labels, signals, masks, experiment["preprocess_cfg"], False, seed)
+        train_set = _dataset(
+            fold["train"], labels, signals, masks, experiment["preprocess_cfg"], True, seed + fold_id, rr, fold["train"]
+        )
+        val_set = _dataset(
+            fold["val"], labels, signals, masks, experiment["preprocess_cfg"], False, seed, rr, fold["train"]
+        )
         train_loader = _loader(train_set, batch_size, True, num_workers, device)
         val_loader = _loader(val_set, batch_size, False, num_workers, device)
         weights = class_weights(labels, fold["train"])
@@ -208,14 +235,24 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
     refit_cfg["patience"] = refit_epochs + 1
     final_model = build_model(experiment["model"])
     train_set = _dataset(
-        splits["trainval"], labels, signals, masks, experiment["preprocess_cfg"], True, seed + 100
+        splits["trainval"],
+        labels,
+        signals,
+        masks,
+        experiment["preprocess_cfg"],
+        True,
+        seed + 100,
+        rr,
+        splits["trainval"],
     )
     train_loader = _loader(train_set, batch_size, True, num_workers, device)
     weights = class_weights(labels, splits["trainval"])
     final_model, _epoch = _fit(
         final_model, train_loader, None, refit_cfg, weights, device, seed + 100
     )
-    test_set = _dataset(splits["test"], labels, signals, masks, experiment["preprocess_cfg"], False, seed)
+    test_set = _dataset(
+        splits["test"], labels, signals, masks, experiment["preprocess_cfg"], False, seed, rr, splits["trainval"]
+    )
     test_loader = _loader(test_set, batch_size, False, num_workers, device)
     timed = time.perf_counter()
     test_probs, test_pred, _test_truth = _predict(final_model, test_loader, device)

@@ -68,6 +68,7 @@ class DilatedResNet(nn.Module):
         dilations: list[int],
         dropout: float,
         pooling: str = "mean",
+        with_head: bool = True,
     ) -> None:
         super().__init__()
         if pooling not in {"mean", "attention"}:
@@ -92,15 +93,20 @@ class DilatedResNet(nn.Module):
         self.stages = nn.ModuleList(stages)
         self.dilations = list(dilations)
         self.pooling_name = pooling
-        self.attention = MaskedTemporalAttention(channels[-1]) if pooling == "attention" else None
-        self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(channels[-1], 4)
+        self.attention = MaskedTemporalAttention(channels[-1]) if with_head and pooling == "attention" else None
+        self.dropout = nn.Dropout(dropout) if with_head else None
+        self.classifier = nn.Linear(channels[-1], 4) if with_head else None
 
-    def forward(self, signal: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def encode(self, signal: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         values = self.stem(signal.unsqueeze(1))
         mask = resize_mask(mask, values.shape[-1])
         for stage in self.stages:
             values, mask = stage(values, mask)
+        return values, mask
+
+    def forward(self, signal: torch.Tensor, mask: torch.Tensor, extras: torch.Tensor | None = None) -> torch.Tensor:
+        del extras
+        values, mask = self.encode(signal, mask)
         if self.attention is None:
             pooled = masked_global_average(values, mask)
         else:

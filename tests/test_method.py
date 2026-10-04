@@ -147,6 +147,33 @@ def test_models_read_a_masked_minute():
     assert attended(signal, mask).shape == (2, 4)
     assert attended.pooling_name == "attention"
     assert attended.attention is not None
+    fused = build_model(
+        {
+            "name": "dilated_resnet_rr",
+            "channels": [8, 8],
+            "dilations": [1, 2],
+            "dropout": 0.0,
+            "rr_dim": 16,
+        }
+    )
+    rhythm = torch.randn(2, 16)
+    recurrent = build_model(
+        {"name": "dilated_resnet_gru", "channels": [8, 8], "dilations": [1, 2], "dropout": 0.0, "gru_hidden": 8}
+    )
+    transformer = build_model(
+        {
+            "name": "dilated_resnet_transformer",
+            "channels": [8, 8],
+            "dilations": [1, 2],
+            "dropout": 0.0,
+            "transformer_heads": 2,
+            "transformer_layers": 1,
+            "transformer_ff": 16,
+        }
+    )
+    assert fused(signal, mask, rhythm).shape == (2, 4)
+    assert recurrent(signal, mask).shape == (2, 4)
+    assert transformer(signal, mask).shape == (2, 4)
 
 
 def test_threshold_is_chosen_from_the_arrays_it_is_given():
