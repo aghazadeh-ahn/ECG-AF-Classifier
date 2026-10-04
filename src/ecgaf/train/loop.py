@@ -128,20 +128,33 @@ def _fit(
     )
     epochs = int(train_cfg["epochs"])
     patience = int(train_cfg["patience"])
+    scheduler = None
+    scheduler_name = str(train_cfg.get("scheduler", "none"))
+    if scheduler_name == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=epochs,
+            eta_min=float(train_cfg.get("min_lr", 1e-6)),
+        )
+    elif scheduler_name != "none":
+        raise ValueError(f"Unknown scheduler: {scheduler_name}")
     best_score = -1.0
     best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
     best_epoch = 1
     stale = 0
     for epoch in range(1, epochs + 1):
         loss = _train_one_epoch(model, train_loader, optimizer, criterion, device, epoch)
+        learning_rate = optimizer.param_groups[0]["lr"]
+        if scheduler is not None:
+            scheduler.step()
         if val_loader is None:
             best_epoch = epoch
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-            print(f"epoch {epoch} loss {loss:.4f}", flush=True)
+            print(f"epoch {epoch} loss {loss:.4f} lr {learning_rate:.6f}", flush=True)
             continue
         probabilities, predicted, truth = _predict(model, val_loader, device)
         score = challenge_f1(indices_to_labels(truth), indices_to_labels(predicted))
-        print(f"epoch {epoch} loss {loss:.4f} val F1 {score:.4f}", flush=True)
+        print(f"epoch {epoch} loss {loss:.4f} val F1 {score:.4f} lr {learning_rate:.6f}", flush=True)
         if score > best_score:
             best_score = score
             best_epoch = epoch
@@ -199,6 +212,7 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
     started = time.perf_counter()
     fold_scores: list[float] = []
     best_epochs: list[int] = []
+    fold_states: list[dict[str, torch.Tensor]] = []
     oof_probs = np.zeros((len(records), 4), dtype=np.float32)
     oof_pred = np.zeros(len(records), dtype=np.int64)
     oof_filled = np.zeros(len(records), dtype=bool)
@@ -223,39 +237,57 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
         )
         fold_scores.append(score)
         best_epochs.append(best_epoch)
+        fold_states.append({key: value.detach().cpu().clone() for key, value in model.state_dict().items()})
         oof_probs[fold["val"]] = probabilities
         oof_pred[fold["val"]] = predicted
         oof_filled[fold["val"]] = True
         print(f"fold {fold_id} best epoch {best_epoch} challenge F1 {score:.4f}", flush=True)
 
-    refit_epochs = max(1, int(np.median(best_epochs)))
-    print(f"refit on trainval for {refit_epochs} epochs", flush=True)
-    refit_cfg = dict(train_cfg)
-    refit_cfg["epochs"] = refit_epochs
-    refit_cfg["patience"] = refit_epochs + 1
-    final_model = build_model(experiment["model"])
-    train_set = _dataset(
-        splits["trainval"],
-        labels,
-        signals,
-        masks,
-        experiment["preprocess_cfg"],
-        True,
-        seed + 100,
-        rr,
-        splits["trainval"],
-    )
-    train_loader = _loader(train_set, batch_size, True, num_workers, device)
-    weights = class_weights(labels, splits["trainval"])
-    final_model, _epoch = _fit(
-        final_model, train_loader, None, refit_cfg, weights, device, seed + 100
-    )
+    score_test = str(train_cfg.get("score_test", "refit"))
     test_set = _dataset(
         splits["test"], labels, signals, masks, experiment["preprocess_cfg"], False, seed, rr, splits["trainval"]
     )
     test_loader = _loader(test_set, batch_size, False, num_workers, device)
     timed = time.perf_counter()
-    test_probs, test_pred, _test_truth = _predict(final_model, test_loader, device)
+    refit_epochs: int | None
+    if score_test == "fold_ensemble":
+        print("score locked test with the five fold models", flush=True)
+        accumulated = None
+        for state in fold_states:
+            fold_model = build_model(experiment["model"])
+            fold_model.load_state_dict(state)
+            fold_model.to(device)
+            probabilities, _predicted, _truth = _predict(fold_model, test_loader, device)
+            accumulated = probabilities if accumulated is None else accumulated + probabilities
+        test_probs = accumulated / len(fold_states)
+        test_pred = test_probs.argmax(axis=1)
+        refit_epochs = None
+    elif score_test == "refit":
+        refit_epochs = max(1, int(np.median(best_epochs)))
+        print(f"refit on trainval for {refit_epochs} epochs", flush=True)
+        refit_cfg = dict(train_cfg)
+        refit_cfg["epochs"] = refit_epochs
+        refit_cfg["patience"] = refit_epochs + 1
+        final_model = build_model(experiment["model"])
+        train_set = _dataset(
+            splits["trainval"],
+            labels,
+            signals,
+            masks,
+            experiment["preprocess_cfg"],
+            True,
+            seed + 100,
+            rr,
+            splits["trainval"],
+        )
+        train_loader = _loader(train_set, batch_size, True, num_workers, device)
+        weights = class_weights(labels, splits["trainval"])
+        final_model, _epoch = _fit(
+            final_model, train_loader, None, refit_cfg, weights, device, seed + 100
+        )
+        test_probs, test_pred, _test_truth = _predict(final_model, test_loader, device)
+    else:
+        raise ValueError(f"Unknown score_test mode: {score_test}")
     seconds_per_record = (time.perf_counter() - timed) / max(len(splits["test"]), 1)
     y_true = np.array([labels[index] for index in splits["test"]])
     y_pred = indices_to_labels(test_pred)
@@ -263,7 +295,8 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
         "experiment": experiment["name"],
         "model": experiment["model"]["name"],
         "device": device.type,
-        "n_parameters": count_parameters(final_model),
+        "n_parameters": count_parameters(model),
+        "score_test": score_test,
         "challenge_f1_test": challenge_f1(y_true, y_pred),
         "per_class_f1_test": per_class_f1(y_true, y_pred),
         "cv_challenge_f1_mean": float(np.mean(fold_scores)),
@@ -278,7 +311,10 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
     }
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    torch.save(final_model.state_dict(), run_dir / "final.pt")
+    if score_test == "fold_ensemble":
+        torch.save(fold_states, run_dir / "folds.pt")
+    else:
+        torch.save(final_model.state_dict(), run_dir / "final.pt")
     np.savez(
         run_dir / "oof_predictions.npz",
         probs=oof_probs,

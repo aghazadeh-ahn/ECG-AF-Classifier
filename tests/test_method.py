@@ -205,6 +205,13 @@ def test_experiment_files_keep_the_same_split_and_encode_ablations():
     assert no_dilation["model"]["dilations"] == [1, 1, 1, 1]
     assert hard_crop["preprocess_cfg"]["length"]["mode"] == "hard_crop"
     assert proposed["preprocess_cfg"]["length"]["mode"] == "mask"
+    longer = load_experiment(root / "configs" / "experiments" / "10_long_cosine.yaml")
+    assert longer["split"] == proposed["split"]
+    assert longer["preprocess_cfg"] == proposed["preprocess_cfg"]
+    assert longer["model"] == proposed["model"]
+    assert longer["train"]["epochs"] == 100
+    assert longer["train"]["scheduler"] == "cosine"
+    assert longer["train"]["score_test"] == "fold_ensemble"
 
 
 def test_real_record_loads_when_the_challenge_files_are_present():
