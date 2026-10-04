@@ -1,0 +1,45 @@
+{
+  "experiment": "08_dilated_gru",
+  "compared_to": "03_dilated_resnet",
+  "change": "Same small dilated residual encoder with a bidirectional GRU reading the short convolutional sequence instead of mean pooling.",
+  "model": {
+    "name": "dilated_resnet_gru",
+    "channels": [16, 32, 64, 128],
+    "dilations": [1, 2, 4, 8],
+    "dropout": 0.2,
+    "gru_hidden": 64,
+    "n_parameters": 186164
+  },
+  "baseline_03": {
+    "n_parameters": 111668,
+    "challenge_f1_test": 0.7960841800458048,
+    "cv_challenge_f1_mean": 0.8209442633646145,
+    "per_class_f1_test": {
+      "N": 0.8970661362506216,
+      "A": 0.7584097859327217,
+      "O": 0.732776617954071,
+      "~": 0.6551724137931034
+    }
+  },
+  "challenge_f1_test": 0.7686434355903088,
+  "cv_challenge_f1_mean": 0.828710644243323,
+  "cv_challenge_f1_std": 0.0057536210645999205,
+  "fold_scores": [
+    0.828205373836163,
+    0.8229298195694542,
+    0.8395838902317672,
+    0.8276618759296492,
+    0.8251722616495812
+  ],
+  "best_epochs": [11, 11, 22, 12, 14],
+  "refit_epochs": 12,
+  "per_class_f1_test": {
+    "N": 0.9036201222378938,
+    "A": 0.6774193548387096,
+    "O": 0.7248908296943232,
+    "~": 0.5785123966942148
+  },
+  "seconds_per_record": 0.001594327667056708,
+  "wall_seconds": 1927.0326881,
+  "note": "Cross-validation rose and became more stable, but locked test fell. AF F1 dropped the most because many AF records were predicted as Other, so the GRU head is not kept as the proposed model."
+}
