@@ -1,0 +1,47 @@
+{
+  "experiment": "09_dilated_transformer",
+  "compared_to": "03_dilated_resnet",
+  "change": "Same small dilated residual encoder with a light transformer encoder on the short convolutional sequence instead of mean pooling.",
+  "model": {
+    "name": "dilated_resnet_transformer",
+    "channels": [16, 32, 64, 128],
+    "dilations": [1, 2, 4, 8],
+    "dropout": 0.2,
+    "transformer_heads": 4,
+    "transformer_layers": 2,
+    "transformer_ff": 256,
+    "n_parameters": 376628
+  },
+  "baseline_03": {
+    "n_parameters": 111668,
+    "challenge_f1_test": 0.7960841800458048,
+    "cv_challenge_f1_mean": 0.8209442633646145,
+    "per_class_f1_test": {
+      "N": 0.8970661362506216,
+      "A": 0.7584097859327217,
+      "O": 0.732776617954071,
+      "~": 0.6551724137931034
+    }
+  },
+  "challenge_f1_test": 0.7850391073441992,
+  "cv_challenge_f1_mean": 0.8211857752606864,
+  "cv_challenge_f1_std": 0.012220965540567553,
+  "fold_scores": [
+    0.8163117995552026,
+    0.8110170040642867,
+    0.819310493080747,
+    0.8142666574436811,
+    0.8450229221595148
+  ],
+  "best_epochs": [16, 10, 10, 10, 25],
+  "refit_epochs": 10,
+  "per_class_f1_test": {
+    "N": 0.8854961832061069,
+    "A": 0.7296416938110749,
+    "O": 0.7399794450154162,
+    "~": 0.5748502994011976
+  },
+  "seconds_per_record": 0.0029680280187574185,
+  "wall_seconds": 5593.7349030000005,
+  "note": "Cross-validation matched the baseline, but locked test stayed slightly below it. AF and Normal fell a little while Other rose slightly, so the transformer head is not kept as the proposed model."
+}
