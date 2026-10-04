@@ -13,6 +13,7 @@ from ecgaf.eval.metrics import CLASS_TO_INDEX, challenge_f1, class_f1
 from ecgaf.eval.selective import choose_threshold, selective_scores
 from ecgaf.eval.splits import assert_disjoint, make_splits
 from ecgaf.models.registry import build_model
+from ecgaf.preprocess.augment import augment_fixed
 from ecgaf.preprocess.invert import correct_inversion
 from ecgaf.preprocess.length import fix_length
 from ecgaf.preprocess.pipeline import preprocess_signal
@@ -212,6 +213,51 @@ def test_experiment_files_keep_the_same_split_and_encode_ablations():
     assert longer["train"]["epochs"] == 100
     assert longer["train"]["scheduler"] == "cosine"
     assert longer["train"]["score_test"] == "fold_ensemble"
+    strong = load_experiment(root / "configs" / "experiments" / "11_strong_augment.yaml")
+    assert strong["split"] == longer["split"]
+    assert strong["model"] == longer["model"]
+    assert strong["train"] == longer["train"]
+    assert strong["preprocess_cfg"]["bandpass"] == longer["preprocess_cfg"]["bandpass"]
+    assert strong["preprocess_cfg"]["augment"]["scale_min"] == 0.7
+    assert strong["preprocess_cfg"]["augment"]["warp_min"] == 0.9
+    assert strong["preprocess_cfg"]["augment"]["cutout_seconds"] == 1.5
+
+
+def test_strong_augment_preserves_shape_and_drops_padding():
+    signal = np.zeros(1800, dtype=np.float32)
+    signal[600:1200] = np.linspace(-1.0, 1.0, 600, dtype=np.float32)
+    mask = np.zeros(1800, dtype=np.float32)
+    mask[600:1200] = 1.0
+    plain, plain_mask = augment_fixed(
+        signal,
+        mask,
+        {"max_shift_seconds": 0.0, "scale_min": 2.0, "scale_max": 2.0, "noise_std": 0.0},
+        300,
+        np.random.default_rng(0),
+    )
+    assert np.allclose(plain, signal * 2)
+    assert np.array_equal(plain_mask, mask)
+    augmented, augmented_mask = augment_fixed(
+        signal,
+        mask,
+        {
+            "max_shift_seconds": 0.0,
+            "scale_min": 1.0,
+            "scale_max": 1.0,
+            "noise_std": 0.0,
+            "warp_min": 0.9,
+            "warp_max": 0.9,
+            "wander_amp": 0.2,
+            "wander_hz_min": 0.2,
+            "wander_hz_max": 0.2,
+            "cutout_seconds": 0.5,
+        },
+        300,
+        np.random.default_rng(1),
+    )
+    assert augmented.shape == augmented_mask.shape == signal.shape
+    assert np.all(augmented[augmented_mask < 0.5] == 0)
+    assert augmented_mask.sum() < mask.sum()
 
 
 def test_real_record_loads_when_the_challenge_files_are_present():
