@@ -1,0 +1,31 @@
+{
+  "experiment": "13_class_scales",
+  "compared_to": "11_strong_augment",
+  "change": "No retraining. Class scales for AF, Other, and noise were chosen on the out-of-fold probabilities of experiment 11, then applied to the locked-test ensemble. Prediction is the class with the largest probability divided by its scale. Normal stays at 1.",
+  "grid": [0.7, 0.85, 1.0, 1.15, 1.35, 1.6],
+  "scales": {
+    "N": 1.0,
+    "A": 1.15,
+    "O": 1.15,
+    "~": 1.35
+  },
+  "oof_challenge_f1_argmax": 0.8451649918096601,
+  "oof_challenge_f1_scaled": 0.8455055427949318,
+  "baseline_11": {
+    "challenge_f1_test": 0.8268040772108662,
+    "per_class_f1_test": {
+      "N": 0.911976911976912,
+      "A": 0.8106312292358804,
+      "O": 0.7578040904198062,
+      "~": 0.6796116504854369
+    }
+  },
+  "challenge_f1_test": 0.8238086386533413,
+  "per_class_f1_test": {
+    "N": 0.9113441372735939,
+    "A": 0.8106312292358804,
+    "O": 0.7494505494505495,
+    "~": 0.6796116504854369
+  },
+  "note": "The out-of-fold gain is a few ten-thousandths and the locked test fell, mostly on Other. The scales are not kept."
+}

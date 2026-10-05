@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from ecgaf.config import load_experiment, project_root
+from ecgaf.eval.decision import choose_class_scales, predict_with_scales
 from ecgaf.eval.metrics import CLASS_TO_INDEX, challenge_f1, class_f1
 from ecgaf.eval.selective import choose_threshold, selective_scores
 from ecgaf.eval.splits import assert_disjoint, make_splits
@@ -247,6 +248,23 @@ def test_random_crop_stays_inside_one_record_and_windows_cover_it():
     short_views = sliding_windows(short, short_mask, window=9_000, hop=3_000)
     assert len(short_views) == 1
     assert int(short_views[0][1].sum()) == 2_700
+
+
+def test_class_scales_are_chosen_without_looking_at_a_held_out_row():
+    probabilities = np.array(
+        [
+            [0.42, 0.40, 0.15, 0.03],
+            [0.38, 0.36, 0.20, 0.06],
+            [0.80, 0.10, 0.08, 0.02],
+        ],
+        dtype=np.float64,
+    )
+    y_true = np.array(["A", "A", "N"])
+    chosen = choose_class_scales(y_true, probabilities, grid=(0.7, 1.0))
+    assert chosen["scales"]["N"] == 1.0
+    assert chosen["scales"]["A"] == 0.7
+    tuned = predict_with_scales(probabilities, np.array([1.0, chosen["scales"]["A"], chosen["scales"]["O"], chosen["scales"]["~"]]))
+    assert challenge_f1(y_true, tuned) >= challenge_f1(y_true, predict_with_scales(probabilities, np.ones(4)))
 
 
 def test_strong_augment_preserves_shape_and_drops_padding():
