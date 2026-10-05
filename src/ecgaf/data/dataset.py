@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from ecgaf.data.windows import random_crop
 from ecgaf.eval.metrics import CLASS_TO_INDEX
 from ecgaf.preprocess.augment import augment_fixed
 
@@ -34,11 +35,15 @@ class ECGDataset(Dataset):
         self.rr: np.ndarray | None = None
         self.rr_mean: np.ndarray | None = None
         self.rr_std: np.ndarray | None = None
+        self.crop: dict | None = None
 
     def set_rr(self, rr: np.ndarray, mean: np.ndarray, std: np.ndarray) -> None:
         self.rr = rr
         self.rr_mean = mean.astype(np.float32)
         self.rr_std = std.astype(np.float32)
+
+    def set_crop(self, crop: dict | None) -> None:
+        self.crop = crop
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
@@ -50,8 +55,13 @@ class ECGDataset(Dataset):
         global_index = int(self.indices[item])
         signal = np.array(self.signals[global_index], dtype=np.float32, copy=True)
         mask = np.array(self.masks[global_index], dtype=np.float32, copy=True)
-        if self.augment and self.preprocess_cfg.get("augment", {}).get("enabled", False):
-            rng = np.random.default_rng(self.seed + self.epoch * 100_003 + item)
+        needs_rng = self.crop is not None or (
+            self.augment and self.preprocess_cfg.get("augment", {}).get("enabled", False)
+        )
+        rng = np.random.default_rng(self.seed + self.epoch * 100_003 + item) if needs_rng else None
+        if self.crop is not None and rng is not None:
+            signal, mask = random_crop(signal, mask, self.crop, self.sampling_rate, rng)
+        if self.augment and self.preprocess_cfg.get("augment", {}).get("enabled", False) and rng is not None:
             signal, mask = augment_fixed(
                 signal,
                 mask,

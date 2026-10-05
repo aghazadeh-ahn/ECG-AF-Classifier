@@ -13,6 +13,7 @@ from ecgaf.eval.metrics import CLASS_TO_INDEX, challenge_f1, class_f1
 from ecgaf.eval.selective import choose_threshold, selective_scores
 from ecgaf.eval.splits import assert_disjoint, make_splits
 from ecgaf.models.registry import build_model
+from ecgaf.data.windows import random_crop, sliding_windows
 from ecgaf.preprocess.augment import augment_fixed
 from ecgaf.preprocess.invert import correct_inversion
 from ecgaf.preprocess.length import fix_length
@@ -221,6 +222,31 @@ def test_experiment_files_keep_the_same_split_and_encode_ablations():
     assert strong["preprocess_cfg"]["augment"]["scale_min"] == 0.7
     assert strong["preprocess_cfg"]["augment"]["warp_min"] == 0.9
     assert strong["preprocess_cfg"]["augment"]["cutout_seconds"] == 1.5
+    windows = load_experiment(root / "configs" / "experiments" / "12_windows.yaml")
+    assert windows["split"] == strong["split"]
+    assert windows["model"] == strong["model"]
+    assert windows["preprocess_cfg"] == strong["preprocess_cfg"]
+    assert windows["train"]["scheduler"] == "cosine"
+    assert windows["train"]["window"]["train_min_seconds"] == 10
+    assert windows["train"]["window"]["eval_hop_seconds"] == 10
+
+
+def test_random_crop_stays_inside_one_record_and_windows_cover_it():
+    signal = np.arange(18_000, dtype=np.float32)
+    mask = np.ones(18_000, dtype=np.float32)
+    crop_cfg = {"train_min_seconds": 10, "train_max_seconds": 30}
+    cropped, cropped_mask = random_crop(signal, mask, crop_cfg, 300, np.random.default_rng(0))
+    assert cropped.shape == cropped_mask.shape == (9_000,)
+    assert 3_000 <= int(cropped_mask.sum()) <= 9_000
+    assert np.all(cropped[cropped_mask < 0.5] == 0)
+    views = sliding_windows(signal, mask, window=9_000, hop=3_000)
+    assert len(views) == 4
+    assert views[-1][0][-1] == signal[-1]
+    short = np.ones(2_700, dtype=np.float32)
+    short_mask = np.ones(2_700, dtype=np.float32)
+    short_views = sliding_windows(short, short_mask, window=9_000, hop=3_000)
+    assert len(short_views) == 1
+    assert int(short_views[0][1].sum()) == 2_700
 
 
 def test_strong_augment_preserves_shape_and_drops_padding():

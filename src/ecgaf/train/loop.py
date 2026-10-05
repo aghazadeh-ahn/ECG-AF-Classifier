@@ -16,6 +16,7 @@ import ecgaf.models  # noqa: F401  (registers architectures)
 from ecgaf.data.cache import ensure_signal_cache
 from ecgaf.data.dataset import ECGDataset
 from ecgaf.data.records import Record
+from ecgaf.data.windows import sliding_windows
 from ecgaf.eval.metrics import (
     challenge_f1,
     confusion_matrix,
@@ -89,7 +90,21 @@ def _train_one_epoch(
     return total / max(seen, 1)
 
 
-def _predict(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _window_cfg(train_cfg: dict) -> dict | None:
+    window = train_cfg.get("window") or {}
+    if not window.get("enabled", False):
+        return None
+    return window
+
+
+def _predict(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    window_cfg: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if window_cfg is not None:
+        return _predict_windows(model, loader, device, window_cfg)
     model.eval()
     probabilities: list[np.ndarray] = []
     predicted: list[np.ndarray] = []
@@ -109,6 +124,58 @@ def _predict(model: nn.Module, loader: DataLoader, device: torch.device) -> tupl
     )
 
 
+def _predict_windows(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    window_cfg: dict,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Average the class probabilities of overlapping windows from each whole record."""
+    dataset: ECGDataset = loader.dataset
+    sampling_rate = dataset.sampling_rate
+    window = int(round(float(window_cfg["eval_seconds"]) * sampling_rate))
+    hop = int(round(float(window_cfg["eval_hop_seconds"]) * sampling_rate))
+    batch_size = int(loader.batch_size or 1)
+    model.eval()
+    probabilities = np.zeros((len(dataset), 4), dtype=np.float64)
+    counts = np.zeros(len(dataset), dtype=np.int32)
+    truth = np.zeros(len(dataset), dtype=np.int64)
+    chunk_signals: list[np.ndarray] = []
+    chunk_masks: list[np.ndarray] = []
+    chunk_owners: list[int] = []
+
+    def flush() -> None:
+        if not chunk_signals:
+            return
+        signal = torch.from_numpy(np.stack(chunk_signals)).to(device, non_blocking=True)
+        mask = torch.from_numpy(np.stack(chunk_masks)).to(device, non_blocking=True)
+        probability = torch.softmax(model(signal, mask), dim=-1).detach().cpu().numpy()
+        for row, owner in zip(probability, chunk_owners):
+            probabilities[owner] += row
+            counts[owner] += 1
+        chunk_signals.clear()
+        chunk_masks.clear()
+        chunk_owners.clear()
+
+    with torch.inference_mode():
+        for index in range(len(dataset)):
+            item = dataset[index]
+            signal = item[0].numpy()
+            mask = item[1].numpy()
+            truth[index] = int(item[-1])
+            for window_signal, window_mask in sliding_windows(signal, mask, window, hop):
+                chunk_signals.append(window_signal)
+                chunk_masks.append(window_mask)
+                chunk_owners.append(index)
+                if len(chunk_signals) >= batch_size:
+                    flush()
+        flush()
+    counts = np.maximum(counts, 1)
+    probabilities = probabilities / counts[:, None]
+    predicted = probabilities.argmax(axis=1).astype(np.int64)
+    return probabilities.astype(np.float32), predicted, truth
+
+
 def _fit(
     model: nn.Module,
     train_loader: DataLoader,
@@ -117,6 +184,7 @@ def _fit(
     weights: np.ndarray,
     device: torch.device,
     seed: int,
+    window_cfg: dict | None = None,
 ) -> tuple[nn.Module, int]:
     seed_everything(seed)
     model.to(device)
@@ -152,7 +220,7 @@ def _fit(
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
             print(f"epoch {epoch} loss {loss:.4f} lr {learning_rate:.6f}", flush=True)
             continue
-        probabilities, predicted, truth = _predict(model, val_loader, device)
+        probabilities, predicted, truth = _predict(model, val_loader, device, window_cfg)
         score = challenge_f1(indices_to_labels(truth), indices_to_labels(predicted))
         print(f"epoch {epoch} loss {loss:.4f} val F1 {score:.4f} lr {learning_rate:.6f}", flush=True)
         if score > best_score:
@@ -178,6 +246,7 @@ def _dataset(
     seed: int,
     rr: np.ndarray | None = None,
     rr_reference: np.ndarray | None = None,
+    crop: dict | None = None,
 ) -> ECGDataset:
     dataset = ECGDataset(
         indices=indices,
@@ -188,6 +257,7 @@ def _dataset(
         augment=augment,
         seed=seed,
     )
+    dataset.set_crop(crop)
     if rr is not None and rr_reference is not None:
         reference = rr[np.asarray(rr_reference, dtype=int)]
         mean = reference.mean(axis=0)
@@ -209,6 +279,7 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
     batch_size = int(train_cfg["batch_size"])
     num_workers = int(train_cfg.get("num_workers", 0))
     seed = int(experiment["split"]["seed"])
+    window_cfg = _window_cfg(train_cfg)
     started = time.perf_counter()
     fold_scores: list[float] = []
     best_epochs: list[int] = []
@@ -221,7 +292,16 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
         print(f"fold {fold_id}", flush=True)
         model = build_model(experiment["model"])
         train_set = _dataset(
-            fold["train"], labels, signals, masks, experiment["preprocess_cfg"], True, seed + fold_id, rr, fold["train"]
+            fold["train"],
+            labels,
+            signals,
+            masks,
+            experiment["preprocess_cfg"],
+            True,
+            seed + fold_id,
+            rr,
+            fold["train"],
+            window_cfg,
         )
         val_set = _dataset(
             fold["val"], labels, signals, masks, experiment["preprocess_cfg"], False, seed, rr, fold["train"]
@@ -229,8 +309,10 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
         train_loader = _loader(train_set, batch_size, True, num_workers, device)
         val_loader = _loader(val_set, batch_size, False, num_workers, device)
         weights = class_weights(labels, fold["train"])
-        model, best_epoch = _fit(model, train_loader, val_loader, train_cfg, weights, device, seed + fold_id)
-        probabilities, predicted, _truth = _predict(model, val_loader, device)
+        model, best_epoch = _fit(
+            model, train_loader, val_loader, train_cfg, weights, device, seed + fold_id, window_cfg
+        )
+        probabilities, predicted, _truth = _predict(model, val_loader, device, window_cfg)
         score = challenge_f1(
             np.array([labels[index] for index in fold["val"]]),
             indices_to_labels(predicted),
@@ -257,7 +339,7 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
             fold_model = build_model(experiment["model"])
             fold_model.load_state_dict(state)
             fold_model.to(device)
-            probabilities, _predicted, _truth = _predict(fold_model, test_loader, device)
+            probabilities, _predicted, _truth = _predict(fold_model, test_loader, device, window_cfg)
             accumulated = probabilities if accumulated is None else accumulated + probabilities
         test_probs = accumulated / len(fold_states)
         test_pred = test_probs.argmax(axis=1)
@@ -279,13 +361,14 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
             seed + 100,
             rr,
             splits["trainval"],
+            window_cfg,
         )
         train_loader = _loader(train_set, batch_size, True, num_workers, device)
         weights = class_weights(labels, splits["trainval"])
         final_model, _epoch = _fit(
             final_model, train_loader, None, refit_cfg, weights, device, seed + 100
         )
-        test_probs, test_pred, _test_truth = _predict(final_model, test_loader, device)
+        test_probs, test_pred, _test_truth = _predict(final_model, test_loader, device, window_cfg)
     else:
         raise ValueError(f"Unknown score_test mode: {score_test}")
     seconds_per_record = (time.perf_counter() - timed) / max(len(splits["test"]), 1)
