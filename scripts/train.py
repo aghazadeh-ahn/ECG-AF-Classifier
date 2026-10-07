@@ -18,6 +18,7 @@ from ecgaf.eval.selective import choose_threshold, selective_scores
 from ecgaf.eval.splits import load_or_create_splits
 from ecgaf.train.forest import run_forest
 from ecgaf.train.loop import run_torch
+from ecgaf.train.review import run_template_review
 
 
 def run_selective(experiment: dict) -> dict:
@@ -92,6 +93,8 @@ def main(argv: list[str] | None = None) -> None:
     run_dir = project_root() / "runs" / experiment["name"]
     if experiment["model"]["name"] == "random_forest":
         run_forest(experiment, records, splits, run_dir)
+    elif experiment["model"]["name"] == "template_review":
+        run_template_review(experiment, records, splits, run_dir)
     else:
         run_torch(experiment, records, splits, run_dir)
 

@@ -24,6 +24,7 @@ from ecgaf.eval.metrics import (
     per_class_f1,
 )
 from ecgaf.models.registry import build_model, count_parameters
+from ecgaf.features.beats import beat_sequence_batch
 from ecgaf.preprocess.spectrogram import spectrogram_batch
 from ecgaf.train.forest import load_rr_matrix
 from ecgaf.train.weights import class_weights
@@ -249,6 +250,7 @@ def _dataset(
     rr_reference: np.ndarray | None = None,
     crop: dict | None = None,
     spec_augment: dict | None = None,
+    beat_augment: dict | None = None,
 ) -> ECGDataset:
     dataset = ECGDataset(
         indices=indices,
@@ -262,6 +264,8 @@ def _dataset(
     dataset.set_crop(crop)
     if spec_augment is not None and augment:
         dataset.set_spec_augment(spec_augment)
+    if beat_augment is not None and augment:
+        dataset.set_beat_augment(beat_augment)
     if rr is not None and rr_reference is not None:
         reference = rr[np.asarray(rr_reference, dtype=int)]
         mean = reference.mean(axis=0)
@@ -286,6 +290,21 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
             hop_length=int(representation["hop_length"]),
         )
         spec_augment = representation.get("spec_augment")
+    beat_augment = None
+    if representation.get("type") == "beat_sequence":
+        print("building beat sequences", flush=True)
+        sampling_rate = int(representation["sampling_rate"])
+        beat_samples = int(round(float(representation["beat_seconds"]) * sampling_rate))
+        pre_samples = int(round(float(representation["pre_seconds"]) * sampling_rate))
+        signals, masks = beat_sequence_batch(
+            signals,
+            masks,
+            sampling_rate,
+            beat_samples,
+            pre_samples,
+            int(representation["max_beats"]),
+        )
+        beat_augment = representation.get("beat_augment")
     rr = None
     if experiment["model"].get("use_rr"):
         rr = load_rr_matrix(records, experiment["preprocess_cfg"], experiment["project_root"])
@@ -318,6 +337,7 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
             fold["train"],
             window_cfg,
             spec_augment,
+            beat_augment,
         )
         val_set = _dataset(
             fold["val"], labels, signals, masks, experiment["preprocess_cfg"], False, seed, rr, fold["train"]
@@ -379,6 +399,7 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
             splits["trainval"],
             window_cfg,
             spec_augment,
+            beat_augment,
         )
         train_loader = _loader(train_set, batch_size, True, num_workers, device)
         weights = class_weights(labels, splits["trainval"])

@@ -16,6 +16,10 @@ from ecgaf.eval.splits import assert_disjoint, make_splits
 from ecgaf.models.registry import build_model
 from ecgaf.data.windows import random_crop, sliding_windows
 from ecgaf.preprocess.augment import augment_fixed
+from ecgaf.eval.review import review_normal_calls
+from ecgaf.features.beats import beat_sequence
+from ecgaf.features.templates import two_templates
+from ecgaf.models.beat_lstm import BeatLSTM
 from ecgaf.preprocess.spectrogram import apply_spec_augment, log_spectrogram
 from ecgaf.preprocess.invert import correct_inversion
 from ecgaf.preprocess.length import fix_length
@@ -247,6 +251,23 @@ def test_experiment_files_keep_the_same_split_and_encode_ablations():
     assert spectral["representation"]["type"] == "log_spectrogram"
     assert spectral["model"]["name"] == "spec_resnet"
     assert spectral["train"]["score_test"] == "fold_ensemble"
+    sequence = load_experiment(root / "configs" / "experiments" / "15_beat_lstm.yaml")
+    assert sequence["split"] == proposed["split"]
+    assert sequence["preprocess_cfg"]["bandpass"] == proposed["preprocess_cfg"]["bandpass"]
+    assert sequence["preprocess_cfg"]["invert"]["enabled"] is True
+    assert sequence["preprocess_cfg"]["augment"]["enabled"] is False
+    assert sequence["representation"]["type"] == "beat_sequence"
+    assert sequence["model"]["name"] == "beat_lstm"
+    assert sequence["train"]["score_test"] == "fold_ensemble"
+    review = load_experiment(root / "configs" / "experiments" / "16_normal_review.yaml")
+    winner = load_experiment(root / "configs" / "experiments" / "11_strong_augment.yaml")
+    assert review["split"] == winner["split"]
+    assert review["preprocess_cfg"]["bandpass"] == winner["preprocess_cfg"]["bandpass"]
+    assert review["preprocess_cfg"]["invert"]["enabled"] is True
+    assert review["source_run"] == "runs/11_strong_augment"
+    assert review["representation"]["type"] == "two_templates"
+    assert review["model"]["name"] == "template_review"
+    assert review["train"]["score_test"] == "fold_ensemble"
 
 
 def test_log_spectrogram_hides_padding_and_spec_augment_keeps_shape():
@@ -269,6 +290,40 @@ def test_log_spectrogram_hides_padding_and_spec_augment_keeps_shape():
     assert augmented.shape == spectrum.shape
     assert augmented_mask.shape == frame_mask.shape
     assert augmented_mask.sum() <= frame_mask.sum()
+
+
+def test_beat_sequence_keeps_each_peak_and_the_lstm_uses_mean_and_max():
+    sampling_rate = 300
+    waveform = np.zeros(3000, dtype=np.float32)
+    peaks = np.arange(300, 2700, 300)
+    waveform[peaks] = 8.0
+    mask = np.ones(3000, dtype=np.float32)
+    beats, beat_mask = beat_sequence(waveform, mask, sampling_rate, beat_samples=180, pre_samples=75, max_beats=16)
+    assert int(beat_mask.sum()) == peaks.size
+    assert beats.shape == (16, 182)
+    assert np.allclose(beats[0, -1], 1.0)
+    assert beats[0, -2] == 0.0
+    model = BeatLSTM(beat_length=180, hidden=8, dropout=0.0)
+    logits = model(torch.from_numpy(beats).unsqueeze(0), torch.from_numpy(beat_mask).unsqueeze(0))
+    assert logits.shape == (1, 4)
+
+
+def test_odd_beat_becomes_the_second_template_and_only_normal_calls_can_change():
+    sampling_rate = 300
+    waveform = np.zeros(3000, dtype=np.float32)
+    peaks = np.arange(300, 2700, 300)
+    waveform[peaks] = 8.0
+    odd = int(peaks[3])
+    waveform[odd - 12 : odd + 12] = 4.0
+    mask = np.ones(3000, dtype=np.float32)
+    templates = two_templates(waveform, mask, sampling_rate, beat_samples=180, pre_samples=75)
+    assert templates.shape == (2, 180)
+    beats = two_templates(waveform, mask, sampling_rate, beat_samples=180, pre_samples=75)
+    distance = np.linalg.norm(beats[1] - beats[0])
+    assert distance > 1.0
+    base = np.array([0, 1, 2, 3, 0])
+    revised = review_normal_calls(base, np.array([True, True, True, True, False]))
+    assert revised.tolist() == [2, 1, 2, 3, 0]
 
 
 def test_random_crop_stays_inside_one_record_and_windows_cover_it():

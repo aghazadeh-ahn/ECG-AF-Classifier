@@ -1,0 +1,79 @@
+{
+  "experiment": "16_normal_review",
+  "compared_to": "11_strong_augment",
+  "change": "Model 11 predictions stay in place. A record changes from Normal to Other only when a second network, trained on the usual beat and the least similar beat, says Other. The second network is fit on Normal and Other records inside each training fold.",
+  "model": {
+    "name": "template_review",
+    "n_parameters": 13266
+  },
+  "baseline_11": {
+    "challenge_f1_test": 0.8268040772108662,
+    "cv_challenge_f1_mean": 0.8449414006449653,
+    "per_class_f1_test": {
+      "N": 0.911976911976912,
+      "A": 0.8106312292358804,
+      "O": 0.7578040904198062,
+      "~": 0.6796116504854369
+    }
+  },
+  "challenge_f1_test": 0.7993801157785684,
+  "per_class_f1_test": {
+    "N": 0.872264631043257,
+    "A": 0.8106312292358804,
+    "O": 0.7152444870565676,
+    "~": 0.6796116504854369
+  },
+  "cv_challenge_f1_mean": 0.8138246633877048,
+  "cv_challenge_f1_std": 0.019067009536831832,
+  "fold_scores": [
+    0.8307049471599585,
+    0.783370080395463,
+    0.8265199875727371,
+    0.8291599741990782,
+    0.7993683276112872
+  ],
+  "base_fold_scores": [
+    0.848381250424905,
+    0.8244198864429998,
+    0.8462633804127072,
+    0.8610456335259465,
+    0.8445968524182677
+  ],
+  "best_epochs": [
+    9,
+    6,
+    1,
+    4,
+    19
+  ],
+  "confusion_matrix_test": [
+    [
+      857,
+      2,
+      152,
+      4
+    ],
+    [
+      1,
+      122,
+      28,
+      1
+    ],
+    [
+      79,
+      24,
+      373,
+      7
+    ],
+    [
+      13,
+      1,
+      7,
+      35
+    ]
+  ],
+  "oof_normal_to_other": 433,
+  "test_normal_to_other": 114,
+  "wall_seconds": 67.60214769999948,
+  "note": "The Normal review is not kept. Model 11 remains the proposed model."
+}
