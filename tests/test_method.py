@@ -16,6 +16,7 @@ from ecgaf.eval.splits import assert_disjoint, make_splits
 from ecgaf.models.registry import build_model
 from ecgaf.data.windows import random_crop, sliding_windows
 from ecgaf.preprocess.augment import augment_fixed
+from ecgaf.preprocess.spectrogram import apply_spec_augment, log_spectrogram
 from ecgaf.preprocess.invert import correct_inversion
 from ecgaf.preprocess.length import fix_length
 from ecgaf.preprocess.pipeline import preprocess_signal
@@ -177,6 +178,14 @@ def test_models_read_a_masked_minute():
     assert fused(signal, mask, rhythm).shape == (2, 4)
     assert recurrent(signal, mask).shape == (2, 4)
     assert transformer(signal, mask).shape == (2, 4)
+    spectrum = torch.randn(2, 65, 80)
+    spectrum_mask = torch.ones(2, 80)
+    spectrum_mask[:, 60:] = 0
+    spectral = build_model(
+        {"name": "spec_resnet", "channels": [8, 8], "dilations": [1, 2], "dropout": 0.0}
+    )
+    assert spectral(spectrum, spectrum_mask).shape == (2, 4)
+    assert spectral.dilations == [1, 2]
 
 
 def test_threshold_is_chosen_from_the_arrays_it_is_given():
@@ -230,6 +239,36 @@ def test_experiment_files_keep_the_same_split_and_encode_ablations():
     assert windows["train"]["scheduler"] == "cosine"
     assert windows["train"]["window"]["train_min_seconds"] == 10
     assert windows["train"]["window"]["eval_hop_seconds"] == 10
+    spectral = load_experiment(root / "configs" / "experiments" / "14_log_spectrogram.yaml")
+    assert spectral["split"] == proposed["split"]
+    assert spectral["preprocess_cfg"]["bandpass"] == proposed["preprocess_cfg"]["bandpass"]
+    assert spectral["preprocess_cfg"]["invert"]["enabled"] is True
+    assert spectral["preprocess_cfg"]["augment"]["enabled"] is False
+    assert spectral["representation"]["type"] == "log_spectrogram"
+    assert spectral["model"]["name"] == "spec_resnet"
+    assert spectral["train"]["score_test"] == "fold_ensemble"
+
+
+def test_log_spectrogram_hides_padding_and_spec_augment_keeps_shape():
+    waveform = np.zeros(1800, dtype=np.float32)
+    waveform[600:1200] = np.sin(np.linspace(0, 40, 600)).astype(np.float32)
+    mask = np.zeros(1800, dtype=np.float32)
+    mask[600:1200] = 1
+    spectrum, frame_mask = log_spectrogram(waveform, mask, n_fft=128, hop_length=64)
+    assert spectrum.ndim == 2
+    assert spectrum.shape[0] == 65
+    assert frame_mask.shape == (spectrum.shape[1],)
+    assert frame_mask.sum() < frame_mask.size
+    assert frame_mask.sum() > 0
+    augmented, augmented_mask = apply_spec_augment(
+        spectrum,
+        frame_mask,
+        {"freq_masks": 1, "max_freq_bins": 4, "time_masks": 1, "max_time_frames": 2},
+        np.random.default_rng(0),
+    )
+    assert augmented.shape == spectrum.shape
+    assert augmented_mask.shape == frame_mask.shape
+    assert augmented_mask.sum() <= frame_mask.sum()
 
 
 def test_random_crop_stays_inside_one_record_and_windows_cover_it():

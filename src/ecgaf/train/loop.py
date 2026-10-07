@@ -24,6 +24,7 @@ from ecgaf.eval.metrics import (
     per_class_f1,
 )
 from ecgaf.models.registry import build_model, count_parameters
+from ecgaf.preprocess.spectrogram import spectrogram_batch
 from ecgaf.train.forest import load_rr_matrix
 from ecgaf.train.weights import class_weights
 
@@ -247,6 +248,7 @@ def _dataset(
     rr: np.ndarray | None = None,
     rr_reference: np.ndarray | None = None,
     crop: dict | None = None,
+    spec_augment: dict | None = None,
 ) -> ECGDataset:
     dataset = ECGDataset(
         indices=indices,
@@ -258,6 +260,8 @@ def _dataset(
         seed=seed,
     )
     dataset.set_crop(crop)
+    if spec_augment is not None and augment:
+        dataset.set_spec_augment(spec_augment)
     if rr is not None and rr_reference is not None:
         reference = rr[np.asarray(rr_reference, dtype=int)]
         mean = reference.mean(axis=0)
@@ -271,6 +275,17 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
     labels = [record.label for record in records]
     processed_dir = experiment["project_root"] / "data" / "processed"
     signals, masks, _inverted = ensure_signal_cache(records, experiment["preprocess_cfg"], processed_dir)
+    representation = experiment.get("representation") or {}
+    spec_augment = None
+    if representation.get("type") == "log_spectrogram":
+        print("building log spectrograms", flush=True)
+        signals, masks = spectrogram_batch(
+            signals,
+            masks,
+            n_fft=int(representation["n_fft"]),
+            hop_length=int(representation["hop_length"]),
+        )
+        spec_augment = representation.get("spec_augment")
     rr = None
     if experiment["model"].get("use_rr"):
         rr = load_rr_matrix(records, experiment["preprocess_cfg"], experiment["project_root"])
@@ -302,6 +317,7 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
             rr,
             fold["train"],
             window_cfg,
+            spec_augment,
         )
         val_set = _dataset(
             fold["val"], labels, signals, masks, experiment["preprocess_cfg"], False, seed, rr, fold["train"]
@@ -362,6 +378,7 @@ def run_torch(experiment: dict, records: list[Record], splits: dict, run_dir: Pa
             rr,
             splits["trainval"],
             window_cfg,
+            spec_augment,
         )
         train_loader = _loader(train_set, batch_size, True, num_workers, device)
         weights = class_weights(labels, splits["trainval"])

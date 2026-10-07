@@ -21,6 +21,7 @@ def build_model(model_cfg: dict) -> nn.Module:
     import ecgaf.models.cnn1d  # noqa: F401
     import ecgaf.models.dilated_resnet  # noqa: F401
     import ecgaf.models.sequence_heads  # noqa: F401
+    import ecgaf.models.spec_resnet  # noqa: F401
 
     name = model_cfg["name"]
     if name not in _REGISTRY:

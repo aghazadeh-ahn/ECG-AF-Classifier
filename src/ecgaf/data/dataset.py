@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from ecgaf.data.windows import random_crop
 from ecgaf.eval.metrics import CLASS_TO_INDEX
 from ecgaf.preprocess.augment import augment_fixed
+from ecgaf.preprocess.spectrogram import apply_spec_augment
 
 
 class ECGDataset(Dataset):
@@ -36,6 +37,7 @@ class ECGDataset(Dataset):
         self.rr_mean: np.ndarray | None = None
         self.rr_std: np.ndarray | None = None
         self.crop: dict | None = None
+        self.spec_augment: dict | None = None
 
     def set_rr(self, rr: np.ndarray, mean: np.ndarray, std: np.ndarray) -> None:
         self.rr = rr
@@ -44,6 +46,9 @@ class ECGDataset(Dataset):
 
     def set_crop(self, crop: dict | None) -> None:
         self.crop = crop
+
+    def set_spec_augment(self, spec_augment: dict | None) -> None:
+        self.spec_augment = spec_augment
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
@@ -55,13 +60,12 @@ class ECGDataset(Dataset):
         global_index = int(self.indices[item])
         signal = np.array(self.signals[global_index], dtype=np.float32, copy=True)
         mask = np.array(self.masks[global_index], dtype=np.float32, copy=True)
-        needs_rng = self.crop is not None or (
-            self.augment and self.preprocess_cfg.get("augment", {}).get("enabled", False)
-        )
+        waveform_augment = self.augment and self.preprocess_cfg.get("augment", {}).get("enabled", False)
+        needs_rng = self.crop is not None or waveform_augment or (self.augment and self.spec_augment is not None)
         rng = np.random.default_rng(self.seed + self.epoch * 100_003 + item) if needs_rng else None
         if self.crop is not None and rng is not None:
             signal, mask = random_crop(signal, mask, self.crop, self.sampling_rate, rng)
-        if self.augment and self.preprocess_cfg.get("augment", {}).get("enabled", False) and rng is not None:
+        if waveform_augment and rng is not None:
             signal, mask = augment_fixed(
                 signal,
                 mask,
@@ -69,6 +73,8 @@ class ECGDataset(Dataset):
                 self.sampling_rate,
                 rng,
             )
+        if self.augment and self.spec_augment is not None and rng is not None:
+            signal, mask = apply_spec_augment(signal, mask, self.spec_augment, rng)
         label = CLASS_TO_INDEX[self.labels[global_index]]
         signal_tensor = torch.from_numpy(signal)
         mask_tensor = torch.from_numpy(mask)
