@@ -5,7 +5,12 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from ecgaf.models.pooling import MaskedTemporalAttention, masked_global_average, resize_mask
+from ecgaf.models.pooling import (
+    MaskedTemporalAttention,
+    masked_global_average,
+    masked_global_max,
+    resize_mask,
+)
 from ecgaf.models.registry import register
 
 
@@ -71,7 +76,7 @@ class DilatedResNet(nn.Module):
         with_head: bool = True,
     ) -> None:
         super().__init__()
-        if pooling not in {"mean", "attention"}:
+        if pooling not in {"mean", "attention", "mean_max"}:
             raise ValueError(f"Unknown pooling mode: {pooling}")
         self.stem = nn.Sequential(
             nn.Conv1d(1, channels[0], kernel_size=7, stride=2, padding=3),
@@ -95,7 +100,8 @@ class DilatedResNet(nn.Module):
         self.pooling_name = pooling
         self.attention = MaskedTemporalAttention(channels[-1]) if with_head and pooling == "attention" else None
         self.dropout = nn.Dropout(dropout) if with_head else None
-        self.classifier = nn.Linear(channels[-1], 4) if with_head else None
+        head_width = channels[-1] * (2 if pooling == "mean_max" else 1)
+        self.classifier = nn.Linear(head_width, 4) if with_head else None
 
     def encode(self, signal: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         values = self.stem(signal.unsqueeze(1))
@@ -107,7 +113,9 @@ class DilatedResNet(nn.Module):
     def forward(self, signal: torch.Tensor, mask: torch.Tensor, extras: torch.Tensor | None = None) -> torch.Tensor:
         del extras
         values, mask = self.encode(signal, mask)
-        if self.attention is None:
+        if self.pooling_name == "mean_max":
+            pooled = torch.cat([masked_global_average(values, mask), masked_global_max(values, mask)], dim=1)
+        elif self.attention is None:
             pooled = masked_global_average(values, mask)
         else:
             pooled = self.attention(values, mask)

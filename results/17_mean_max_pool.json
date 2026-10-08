@@ -1,0 +1,49 @@
+{
+  "experiment": "17_mean_max_pool",
+  "compared_to": "11_strong_augment",
+  "change": "Same small dilated residual model, split, filter, inversion, normalization, strong training-only augmentation, cosine schedule, and fold-ensemble test scoring. The final pool is the concatenation of masked mean and masked max instead of mean alone.",
+  "model": {
+    "name": "dilated_resnet",
+    "channels": [16, 32, 64, 128],
+    "dilations": [1, 2, 4, 8],
+    "dropout": 0.2,
+    "pooling": "mean_max",
+    "n_parameters": 112180
+  },
+  "baseline_11": {
+    "challenge_f1_test": 0.8268040772108662,
+    "cv_challenge_f1_mean": 0.8449414006449653,
+    "per_class_f1_test": {
+      "N": 0.911976911976912,
+      "A": 0.8106312292358804,
+      "O": 0.7578040904198062,
+      "~": 0.6796116504854369
+    }
+  },
+  "challenge_f1_test": 0.8257607615843586,
+  "per_class_f1_test": {
+    "N": 0.9152542372881356,
+    "A": 0.7896440129449838,
+    "O": 0.7723840345199569,
+    "~": 0.6666666666666666
+  },
+  "cv_challenge_f1_mean": 0.8504585079889802,
+  "cv_challenge_f1_std": 0.007476596404751785,
+  "fold_scores": [
+    0.8522899618083831,
+    0.8438400667463665,
+    0.8430873979399333,
+    0.8637520058030214,
+    0.8493231076471964
+  ],
+  "best_epochs": [67, 49, 24, 42, 45],
+  "confusion_matrix_test": [
+    [945, 5, 57, 8],
+    [4, 122, 24, 2],
+    [88, 29, 358, 8],
+    [13, 1, 5, 37]
+  ],
+  "seconds_per_record": 0.004798921277843167,
+  "wall_seconds": 7286.291190599997,
+  "note": "Cross-validation rose, but the locked-test fold ensemble fell by about 0.001. Other improved and AF fell. The mean-plus-max pool is not kept. Model 11 remains the proposed model."
+}

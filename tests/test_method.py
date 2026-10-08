@@ -259,6 +259,13 @@ def test_experiment_files_keep_the_same_split_and_encode_ablations():
     assert sequence["representation"]["type"] == "beat_sequence"
     assert sequence["model"]["name"] == "beat_lstm"
     assert sequence["train"]["score_test"] == "fold_ensemble"
+    pooled = load_experiment(root / "configs" / "experiments" / "17_mean_max_pool.yaml")
+    best = load_experiment(root / "configs" / "experiments" / "11_strong_augment.yaml")
+    assert pooled["split"] == best["split"]
+    assert pooled["preprocess_cfg"] == best["preprocess_cfg"]
+    assert pooled["train"] == best["train"]
+    assert {key: value for key, value in pooled["model"].items() if key != "pooling"} == best["model"]
+    assert pooled["model"]["pooling"] == "mean_max"
     review = load_experiment(root / "configs" / "experiments" / "16_normal_review.yaml")
     winner = load_experiment(root / "configs" / "experiments" / "11_strong_augment.yaml")
     assert review["split"] == winner["split"]
@@ -324,6 +331,25 @@ def test_odd_beat_becomes_the_second_template_and_only_normal_calls_can_change()
     base = np.array([0, 1, 2, 3, 0])
     revised = review_normal_calls(base, np.array([True, True, True, True, False]))
     assert revised.tolist() == [2, 1, 2, 3, 0]
+
+
+def test_mean_max_pooling_sees_one_strong_step_that_the_mean_dilutes():
+    from ecgaf.models.pooling import masked_global_average, masked_global_max
+
+    values = torch.zeros(1, 2, 100)
+    values[0, 0, 10] = 5.0
+    mask = torch.ones(1, 100)
+    mask[0, 50:] = 0
+    assert float(masked_global_average(values, mask)[0, 0]) == pytest.approx(0.1)
+    assert float(masked_global_max(values, mask)[0, 0]) == 5.0
+    padded_peak = torch.zeros(1, 1, 100)
+    padded_peak[0, 0, 80] = 9.0
+    assert float(masked_global_max(padded_peak, mask)[0, 0]) == 0.0
+    model = build_model(
+        {"name": "dilated_resnet", "channels": [8, 8], "dilations": [1, 2], "dropout": 0.0, "pooling": "mean_max"}
+    )
+    assert model.classifier.in_features == 16
+    assert model(torch.randn(2, 3000), torch.ones(2, 3000)).shape == (2, 4)
 
 
 def test_random_crop_stays_inside_one_record_and_windows_cover_it():

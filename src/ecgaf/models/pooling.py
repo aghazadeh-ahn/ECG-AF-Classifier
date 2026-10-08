@@ -24,6 +24,16 @@ def masked_global_average(values: torch.Tensor, mask: torch.Tensor) -> torch.Ten
     return weighted.sum(dim=-1) / denominator
 
 
+def masked_global_max(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Largest activation over the valid time steps. A fully padded row falls back to step 0."""
+    if mask.dim() == 2:
+        mask = mask.unsqueeze(1)
+    valid = resize_mask(mask, values.shape[-1]) >= 0.5
+    empty = ~valid.any(dim=-1, keepdim=True)
+    valid = valid | (empty & (torch.arange(values.shape[-1], device=values.device) == 0))
+    return values.masked_fill(~valid, torch.finfo(values.dtype).min).max(dim=-1).values
+
+
 class MaskedTemporalAttention(torch.nn.Module):
     """One lightweight score per time step, then a masked weighted average."""
 
